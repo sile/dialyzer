@@ -132,7 +132,7 @@ new() ->
   CodeOptions = [compressed, public, {read_concurrency, true}],
   Code = ets:new(dialyzer_codeserver_code, CodeOptions),
 
-  {ok, SuccTypes} = dets:open_file("/tmp/cache.dialyzer.succ_types", [{auto_save, infinity}, {access, read_write}]),
+  {ok, SuccTypes} = dets:open_file(".cache.dialyzer.succ_types", [{auto_save, infinity}, {access, read_write}]),
   dets:insert(SuccTypes, {phase, 0}),
 
   TempOptions = [public, {write_concurrency, true}],
@@ -165,17 +165,17 @@ get_succ_types(SCC0, Callgraph, CS) ->
           {ok, Phase, SuccTypes, Contracts};
         false ->
           Reqs = [remove_anonymous_from_scc(Req) || Req <- dialyzer_callgraph:get_required_by(SCC0, Callgraph)],
-          io:format("version mismatch: ~w: \n ~w <=> \n ~w\n reqs:~w\n",
-                    [SCC0,
-                     ExpectedVers,
-                     Vers,
-                    Reqs]),
+          %% io:format("version mismatch: ~w: \n ~w <=> \n ~w\n reqs:~w\n",
+          %%           [SCC0,
+          %%            ExpectedVers,
+          %%            Vers,
+          %%           Reqs]),
           dets:delete(CS#codeserver.succ_types, SCC),
           lists:foreach(fun (Req) -> dets:delete(CS#codeserver.succ_types, Req) end, Reqs),
           error
       end;
     _ ->
-      io:format("cache miss: ~w\n", [SCC0]),
+      %% io:format("cache miss: ~w\n", [SCC0]),
       error
   end.
 
