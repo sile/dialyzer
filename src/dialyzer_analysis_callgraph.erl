@@ -564,8 +564,8 @@ send_unknown_behaviours(Parent, UnknownBehaviours) ->
   Parent ! {self(), unknown_behaviours, UnknownBehaviours},
   ok.
 
-send_codeserver_plt(Parent, CServer, Plt ) ->
-  Parent ! {self(), cserver, CServer, Plt},
+send_codeserver_plt(_Parent, _CServer, _Plt ) ->
+%  Parent ! {self(), cserver, CServer, Plt}, % This expression is meaningless in cl mode
   ok.
 
 send_bad_calls(Parent, BadCalls, CodeServer) ->
