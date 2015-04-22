@@ -204,13 +204,13 @@ plt_common(#options{init_plts = [InitPlt]} = Opts, RemoveFiles, AddFiles) ->
       do_analysis(Files, Opts, dialyzer_plt:new(), PltInfo);
     {differ, Md5, DiffMd5, ModDeps} ->
       report_failed_plt_check(Opts, DiffMd5),
-      {AnalFiles, RemovedMods, ModDeps1} = 
+      {AnalFiles, RemovedMods, ModDeps1} =
 	expand_dependent_modules(Md5, DiffMd5, ModDeps),
       Plt = clean_plt(InitPlt, RemovedMods),
       case AnalFiles =:= [] of
 	true ->
 	  %% Only removed stuff. Just write the PLT.
-	  dialyzer_plt:to_file(Opts#options.output_plt, Plt, ModDeps, 
+	  dialyzer_plt:to_file(Opts#options.output_plt, Plt, ModDeps,
 			       {Md5, ModDeps}),
 	  {?RET_NOTHING_SUSPICIOUS, []};
 	false ->
@@ -281,7 +281,7 @@ report_old_version(#options{report_mode = ReportMode, init_plts = [InitPlt]}) ->
 		[InitPlt])
   end.
 
-report_failed_plt_check(#options{analysis_type = AnalType, 
+report_failed_plt_check(#options{analysis_type = AnalType,
 				 report_mode = ReportMode}, DiffMd5) ->
   case AnalType =:= plt_check of
     true ->
@@ -306,7 +306,7 @@ report_analysis_start(#options{analysis_type = Type,
           [InitPlt] = InitPlts,
 	  case InitPlt =:= OutputPlt of
 	    true -> io:format("Adding information to ~s...", [OutputPlt]);
-	    false -> io:format("Adding information from ~s to ~s...", 
+	    false -> io:format("Adding information from ~s to ~s...",
 			       [InitPlt, OutputPlt])
 	  end;
 	plt_build ->
@@ -317,7 +317,7 @@ report_analysis_start(#options{analysis_type = Type,
           [InitPlt] = InitPlts,
 	  case InitPlt =:= OutputPlt of
 	    true -> io:format("Removing information from ~s...", [OutputPlt]);
-	    false -> io:format("Removing information from ~s to ~s...", 
+	    false -> io:format("Removing information from ~s to ~s...",
 			       [InitPlt, OutputPlt])
 	  end;
 	succ_typings -> io:format("Proceeding with analysis...")
@@ -376,7 +376,7 @@ do_analysis(Options) ->
       Plt = dialyzer_plt:merge_plts_or_report_conflicts(PltFiles, Plts),
       do_analysis(Files, Options, Plt, none)
   end.
-  
+
 do_analysis(Files, Options, Plt, PltInfo) ->
   assert_writable(Options#options.output_plt),
   hipe_compile(Files, Options),
@@ -464,7 +464,7 @@ expand_dependent_modules(Md5, DiffMd5, ModDeps) ->
   BigList = sets:to_list(BigSet),
   ExpandedSet = expand_dependent_modules_1(BigList, BigSet, ModDeps),
   NewModDeps = dialyzer_callgraph:strip_module_deps(ModDeps, BigSet),
-  AnalyzeMods = sets:subtract(ExpandedSet, RemovedMods),  
+  AnalyzeMods = sets:subtract(ExpandedSet, RemovedMods),
   FilterFun = fun(File) ->
 		  Mod = list_to_atom(filename:basename(File, ".beam")),
 		  sets:is_element(Mod, AnalyzeMods)
@@ -474,12 +474,12 @@ expand_dependent_modules(Md5, DiffMd5, ModDeps) ->
 expand_dependent_modules_1([Mod|Mods], Included, ModDeps) ->
   case dict:find(Mod, ModDeps) of
     {ok, Deps} ->
-      NewDeps = sets:subtract(sets:from_list(Deps), Included), 
+      NewDeps = sets:subtract(sets:from_list(Deps), Included),
       case sets:size(NewDeps) =:= 0 of
 	true -> expand_dependent_modules_1(Mods, Included, ModDeps);
-	false -> 
+	false ->
 	  NewIncluded = sets:union(Included, NewDeps),
-	  expand_dependent_modules_1(sets:to_list(NewDeps) ++ Mods, 
+	  expand_dependent_modules_1(sets:to_list(NewDeps) ++ Mods,
 				     NewIncluded, ModDeps)
       end;
     error ->
@@ -496,20 +496,22 @@ expand_dependent_modules_1([], Included, _ModDeps) ->
 hipe_compile(Files, #options{erlang_mode = ErlangMode} = Options) ->
   NoNative = (get(dialyzer_options_native) =:= false),
   FewFiles = (length(Files) < ?MIN_FILES_FOR_NATIVE_COMPILE),
+  Mods = [lists, dict, digraph, digraph_utils, ets,
+          gb_sets, gb_trees, ordsets, sets, sofs,
+          cerl, erl_types, cerl_trees, erl_bif_types,
+          dialyzer_analysis_callgraph, dialyzer, dialyzer_behaviours,
+          dialyzer_codeserver, dialyzer_contracts,
+          dialyzer_coordinator, dialyzer_dataflow, dialyzer_dep,
+          dialyzer_plt, dialyzer_succ_typings, dialyzer_typesig,
+          dialyzer_worker],
   case NoNative orelse FewFiles orelse ErlangMode of
-    true -> ok;
+    true ->
+      load_native(Mods),
+      ok;
     false ->
       case erlang:system_info(hipe_architecture) of
 	undefined -> ok;
 	_ ->
-	  Mods = [lists, dict, digraph, digraph_utils, ets,
-		  gb_sets, gb_trees, ordsets, sets, sofs,
-		  cerl, erl_types, cerl_trees, erl_bif_types,
-		  dialyzer_analysis_callgraph, dialyzer, dialyzer_behaviours,
-		  dialyzer_codeserver, dialyzer_contracts,
-		  dialyzer_coordinator, dialyzer_dataflow, dialyzer_dep,
-		  dialyzer_plt, dialyzer_succ_typings, dialyzer_typesig,
-		  dialyzer_worker],
 	  report_native_comp(Options),
 	  {T1, _} = statistics(wall_clock),
 	  native_compile(Mods),
@@ -518,7 +520,12 @@ hipe_compile(Files, #options{erlang_mode = ErlangMode} = Options) ->
       end
   end.
 
+load_native(Mods) ->
+  lists:foreach(fun code:unstick_dir/1, code:get_path()),
+  lists:foreach(fun code:load_file/1, Mods).
+
 native_compile(Mods) ->
+  load_native(Mods),
   case dialyzer_utils:parallelism() > ?MIN_PARALLELISM of
     true ->
       Parent = self(),
@@ -533,7 +540,7 @@ hc(Mod) ->
   case code:is_module_native(Mod) of
     true -> ok;
     false ->
-      %% io:format(" ~w", [Mod]),
+      io:format(" ~w", [Mod]),
       {ok, Mod} = hipe:c(Mod),
       ok
   end.
@@ -574,7 +581,7 @@ maybe_close_output_file(State) ->
 
 -define(LOG_CACHE_SIZE, 10).
 
-%%-spec cl_loop(#cl_state{}) -> 
+%%-spec cl_loop(#cl_state{}) ->
 cl_loop(State) ->
   cl_loop(State, []).
 
@@ -676,7 +683,7 @@ return_value(State = #cl_state{erlang_mode = ErlangMode,
       print_unknown_behaviours(State),
       maybe_close_output_file(State),
       {RetValue, []};
-    true -> 
+    true ->
       Unknown =
         case ordsets:is_element(?WARN_UNKNOWN, LegalWarnings) of
           true ->
@@ -823,7 +830,7 @@ print_warnings(#cl_state{output = Output,
   end.
 
 -spec process_warnings([dial_warning()]) -> [dial_warning()].
-  
+
 process_warnings(Warnings) ->
   Warnings1 = lists:keysort(2, Warnings), %% Sort on file/line
   remove_duplicate_warnings(Warnings1, []).
@@ -849,7 +856,7 @@ add_files(Files, From) ->
 
 add_files(Files, From, Rec) ->
   Files1 = [filename:absname(F) || F <- Files],
-  Files2 = ordsets:from_list(Files1), 
+  Files2 = ordsets:from_list(Files1),
   Dirs = ordsets:filter(fun(X) -> filelib:is_dir(X) end, Files2),
   Files3 = ordsets:subtract(Files2, Dirs),
   Extension = case From of
@@ -876,9 +883,8 @@ add_file_fun(Extension) ->
 start_analysis(State, Analysis) ->
   Self = self(),
   LegalWarnings = State#cl_state.legal_warnings,
-  Fun = fun() -> 
+  Fun = fun() ->
 	    dialyzer_analysis_callgraph:start(Self, LegalWarnings, Analysis)
 	end,
   BackendPid = spawn_link(Fun),
   State#cl_state{backend_pid = BackendPid}.
-
