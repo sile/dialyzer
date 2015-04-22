@@ -20,7 +20,7 @@
 
 -module(dialyzer_worker).
 
--export([launch/4, sequential/4]).
+-export([launch/5, sequential/4]).
 
 -export_type([worker/0]).
 
@@ -51,9 +51,9 @@
 
 %%--------------------------------------------------------------------
 
--spec launch(mode(), [mfa_or_funlbl()], init_data(), coordinator()) -> worker().
+-spec launch(mode(), [mfa_or_funlbl()], init_data(), coordinator(), fun()) -> worker().
 
-launch(Mode, Job, InitData, Coordinator) ->
+launch(Mode, Job, InitData, Coordinator, Barrier) ->
   State = #state{mode        = Mode,
 		 job         = Job,
 		 init_data   = InitData,
@@ -63,7 +63,7 @@ launch(Mode, Job, InitData, Coordinator) ->
       X when X =:= 'typesig'; X =:= 'dataflow' -> initializing;
       X when X =:= 'compile'; X =:= 'warnings' -> running
     end,
-  spawn_link(fun() -> loop(InitState, State) end).
+  spawn_link(fun() -> Barrier(), loop(InitState, State) end).
 
 %%--------------------------------------------------------------------
 
@@ -126,9 +126,6 @@ send_done(Callers, SCC) ->
 
 continue_broadcast_done([], _SCC, _Coordinator) -> ok;
 continue_broadcast_done(Rest, SCC, Coordinator) ->
-  %% This time limit should be greater than the time required
-  %% by the coordinator to spawn all processes.
-  timer:sleep(500),
   {Callers, Unknown} = dialyzer_coordinator:sccs_to_pids(Rest, Coordinator),
   send_done(Callers, SCC),
   continue_broadcast_done(Unknown, SCC, Coordinator).

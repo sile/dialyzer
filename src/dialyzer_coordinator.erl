@@ -111,17 +111,20 @@ spawn_jobs(Mode, Jobs, InitData, Timing) ->
       true  -> ets:new(scc_to_pid, [{read_concurrency, true}]);
       false -> unused
     end,
+  BarrierRef = make_ref(),
+  Barrier = fun () -> receive BarrierRef -> ok end end,
   Coordinator = {Collector, Regulator, SCCtoPID},
   Fold =
     fun(Job, Count) ->
-	Pid = dialyzer_worker:launch(Mode, Job, InitData, Coordinator),
+	Pid = dialyzer_worker:launch(Mode, Job, InitData, Coordinator, Barrier),
 	case TypesigOrDataflow of
 	  true  -> true = ets:insert(SCCtoPID, {Job, Pid}), ok;
 	  false -> request_activation(Regulator, Pid)
 	end,
-	Count + 1
+	{Pid, Count + 1}
     end,
-  JobCount = lists:foldl(Fold, 0, Jobs),
+  {Workers, JobCount} = lists:mapfoldl(Fold, 0, Jobs),
+  lists:foreach(fun (Worker) -> Worker ! BarrierRef end, Workers),
   Unit =
     case Mode of
       'typesig'  -> "SCCs";
