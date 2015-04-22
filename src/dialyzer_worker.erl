@@ -36,7 +36,8 @@
 	  job              :: mfa_or_funlbl() | file:filename(),
 	  coordinator      :: coordinator(),
 	  init_data        :: init_data(),
-	  depends_on  = [] :: list()
+	  depends_on  = [] :: list(),
+          barrier          :: fun()
 	 }).
 
 -include("dialyzer.hrl").
@@ -57,13 +58,14 @@ launch(Mode, Job, InitData, Coordinator, Barrier) ->
   State = #state{mode        = Mode,
 		 job         = Job,
 		 init_data   = InitData,
+                 barrier     = Barrier,
 		 coordinator = Coordinator},
   InitState =
     case Mode of
       X when X =:= 'typesig'; X =:= 'dataflow' -> initializing;
       X when X =:= 'compile'; X =:= 'warnings' -> running
     end,
-  spawn_link(fun() -> Barrier(), loop(InitState, State) end).
+  spawn_link(fun() -> loop(InitState, State) end).
 
 %%--------------------------------------------------------------------
 
@@ -112,7 +114,8 @@ waits_more_success_typings(#state{depends_on = Depends}) ->
   Depends =/= [].
 
 broadcast_done(#state{job = SCC, init_data = InitData,
-		      coordinator = Coordinator}) ->
+		      coordinator = Coordinator, barrier = Barrier}) ->
+  Barrier(),
   RequiredBy = dialyzer_succ_typings:find_required_by(SCC, InitData),
   {Callers, Unknown} =
     dialyzer_coordinator:sccs_to_pids(RequiredBy, Coordinator),
