@@ -39,7 +39,7 @@
 	 get_core_from_src/1,
 	 get_core_from_src/2,
 	 get_record_and_type_info/1,
-	 get_spec_info/3,
+	 get_spec_info/4,
 	 merge_records/2,
 	 pp_hook/0,
 	 process_record_remote_types/1,
@@ -341,11 +341,12 @@ merge_records(NewRecords, OldRecords) ->
 -type spec_dict()     :: dict:dict().
 -type callback_dict() :: dict:dict().
 
--spec get_spec_info(atom(), abstract_code(), dict:dict()) ->
+-spec get_spec_info(fun(), atom(), abstract_code(), dict:dict()) ->
         {'ok', spec_dict(), callback_dict()} | {'error', string()}.
 
-get_spec_info(ModName, AbstractCode, RecordsDict) ->
-  get_spec_info(AbstractCode, dict:new(), dict:new(),
+get_spec_info(Fun, ModName, AbstractCode, RecordsDict) ->
+  get_spec_info(Fun,
+                AbstractCode, dict:new(), dict:new(),
 		RecordsDict, ModName, "nofile").
 
 %% TypeSpec is a list of conditional contracts for a function.
@@ -354,7 +355,8 @@ get_spec_info(ModName, AbstractCode, RecordsDict) ->
 %%  - Constraint is of the form {subtype, T1, T2} where T1 and T2
 %%    are erl_types:erl_type()
 
-get_spec_info([{attribute, Ln, Contract, {Id, TypeSpec}}|Left],
+get_spec_info(Fun,
+              [{attribute, Ln, Contract, {Id, TypeSpec}}|Left],
 	      SpecDict, CallbackDict, RecordsDict, ModName, File)
   when ((Contract =:= 'spec') or (Contract =:= 'callback')),
        is_list(TypeSpec) ->
@@ -370,14 +372,16 @@ get_spec_info([{attribute, Ln, Contract, {Id, TypeSpec}}|Left],
   try dict:find(MFA, ActiveDict) of
     error ->
       NewActiveDict =
-	dialyzer_contracts:store_tmp_contract(MFA, {File, Ln}, TypeSpec,
+	dialyzer_contracts:store_tmp_contract(Fun,
+                                              MFA, {File, Ln}, TypeSpec,
 					      ActiveDict, RecordsDict),
       {NewSpecDict, NewCallbackDict} =
 	case Contract of
 	  spec     -> {NewActiveDict, CallbackDict};
 	  callback -> {SpecDict, NewActiveDict}
 	end,
-      get_spec_info(Left, NewSpecDict, NewCallbackDict,
+      get_spec_info(Fun,
+                    Left, NewSpecDict, NewCallbackDict,
 		    RecordsDict, ModName,File);
     {ok, {{OtherFile, L},_C}} ->
       {Mod, Fun, Arity} = MFA,
@@ -390,14 +394,19 @@ get_spec_info([{attribute, Ln, Contract, {Id, TypeSpec}}|Left],
       {error, flat_format("  Error while parsing contract in line ~w: ~s\n",
 			  [Ln, Error])}
   end;
-get_spec_info([{attribute, _, file, {IncludeFile, _}}|Left],
+get_spec_info(Fun,
+              [{attribute, _, file, {IncludeFile, _}}|Left],
 	      SpecDict, CallbackDict, RecordsDict, ModName, _File) ->
-  get_spec_info(Left, SpecDict, CallbackDict,
+  get_spec_info(Fun,
+                Left, SpecDict, CallbackDict,
 		RecordsDict, ModName, IncludeFile);
-get_spec_info([_Other|Left], SpecDict, CallbackDict,
+get_spec_info(Fun,
+              [_Other|Left], SpecDict, CallbackDict,
 	      RecordsDict, ModName, File) ->
-  get_spec_info(Left, SpecDict, CallbackDict, RecordsDict, ModName, File);
-get_spec_info([], SpecDict, CallbackDict, _RecordsDict, _ModName, _File) ->
+  get_spec_info(Fun,
+                Left, SpecDict, CallbackDict, RecordsDict, ModName, File);
+get_spec_info(_Fun,
+              [], SpecDict, CallbackDict, _RecordsDict, _ModName, _File) ->
   {ok, SpecDict, CallbackDict}.
 
 %% ============================================================================

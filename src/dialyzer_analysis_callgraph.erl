@@ -398,15 +398,9 @@ compile_common(File, AbstrCode, CompOpts, Callgraph, CServer, UseContracts) ->
 	    dialyzer_codeserver:store_temp_records(Mod, RecInfo, CServer),
 	  case UseContracts of
 	    true ->
-	      case dialyzer_utils:get_spec_info(Mod, AbstrCode, RecInfo) of
-		{error, _} = Error -> Error;
-		{ok, SpecInfo, CallbackInfo} ->
-		  CServer2 =
-		    dialyzer_codeserver:store_temp_contracts(Mod, SpecInfo,
-							     CallbackInfo,
-							     CServer1),
-		  store_core(Mod, Core, NoWarn, Callgraph, CServer2)
-	      end;
+              CServer2 =
+                dialyzer_codeserver:store_temp_contract_srcs(Mod, AbstrCode, RecInfo, CServer1),
+              store_core(Mod, Core, NoWarn, Callgraph, CServer2);
 	    false ->
 	      store_core(Mod, Core, NoWarn, Callgraph, CServer1)
 	  end

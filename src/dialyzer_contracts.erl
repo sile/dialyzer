@@ -31,7 +31,7 @@
 	 %% get_contract_signature/1,
 	 is_overloaded/1,
 	 process_contract_remote_types/1,
-	 store_tmp_contract/5]).
+	 store_tmp_contract/6]).
 
 -export_type([file_contract/0, plt_contracts/0]).
 
@@ -141,23 +141,15 @@ sequence([H|T], Delimiter) -> H ++ Delimiter ++ sequence(T, Delimiter).
 	  dialyzer_codeserver:codeserver().
 
 process_contract_remote_types(CodeServer) ->
-  {TmpContractDict, TmpCallbackDict} =
-    dialyzer_codeserver:get_temp_contracts(CodeServer),
   ExpTypes = dialyzer_codeserver:get_exported_types(CodeServer),
   RecordDict = dialyzer_codeserver:get_records(CodeServer),
   ContractFun =
-    fun({_M, _F, _A}, {File, #tmp_contract{contract_funs = CFuns, forms = Forms}}) ->
+    fun({File, #tmp_contract{contract_funs = CFuns, forms = Forms}}) ->
 	NewCs = [CFun(ExpTypes, RecordDict) || CFun <- CFuns],
 	Args = general_domain(NewCs),
 	{File, #contract{contracts = NewCs, args = Args, forms = Forms}}
     end,
-  ModuleFun =
-    fun(_ModuleName, ContractDict) ->
-	dict:map(ContractFun, ContractDict)
-    end,
-  NewContractDict = dict:map(ModuleFun, TmpContractDict),
-  NewCallbackDict = dict:map(ModuleFun, TmpCallbackDict),
-  dialyzer_codeserver:finalize_contracts(NewContractDict, NewCallbackDict,
+  dialyzer_codeserver:finalize_contracts(ContractFun,
 					 CodeServer).
 
 -type opaques() :: [erl_types:erl_type()] | 'universe'.
@@ -386,14 +378,14 @@ insert_constraints([], Dict) -> Dict.
 
 -type types() :: erl_types:type_table().
 
--spec store_tmp_contract(mfa(), file_line(), [_], contracts(), types()) ->
+-spec store_tmp_contract(fun(), mfa(), file_line(), [_], contracts(), types()) ->
         contracts().
 
-store_tmp_contract(MFA, FileLine, TypeSpec, SpecDict, RecordsDict) ->
+store_tmp_contract(Fun, MFA, FileLine, TypeSpec, SpecDict, RecordsDict) ->
   %% io:format("contract from form: ~p\n", [TypeSpec]),
   TmpContract = contract_from_form(TypeSpec, RecordsDict, FileLine),
   %% io:format("contract: ~p\n", [TmpContract]),
-  dict:store(MFA, {FileLine, TmpContract}, SpecDict).
+  dict:store(MFA, Fun({FileLine, TmpContract}), SpecDict).
 
 contract_from_form(Forms, RecDict, FileLine) ->
   {CFuns, Forms1} = contract_from_form(Forms, RecDict, FileLine, [], []),
