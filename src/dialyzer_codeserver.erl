@@ -48,6 +48,10 @@
 	 lookup_mod_records/2,
 	 lookup_mod_contracts/2,
 	 lookup_mfa_contract/2,
+         get_succ_types/3,
+         set_succ_types/5,
+         increment_succ_types_phase/1,
+         save_succ_types/1,
 	 new/0,
 	 set_next_core_label/2,
 	 set_temp_records/2,
@@ -71,6 +75,7 @@
 
 -record(codeserver, {next_core_label = 0 :: label(),
 		     code		 :: dict_ets(),
+                     succ_types          :: ets:tid(),
                      exported_types      :: set_ets(), % set(mfa())
 		     records             :: dict_ets(),
 		     contracts           :: dict_ets(),
@@ -126,6 +131,10 @@ ets_read_concurrent_table(Name) ->
 new() ->
   CodeOptions = [compressed, public, {read_concurrency, true}],
   Code = ets:new(dialyzer_codeserver_code, CodeOptions),
+
+  {ok, SuccTypes} = dets:open_file("/tmp/cache.dialyzer.succ_types", [{auto_save, infinity}, {access, read_write}]),
+  dets:insert(SuccTypes, {phase, 0}),
+
   TempOptions = [public, {write_concurrency, true}],
   [Exports, TempExportedTypes, TempRecords, TempContractSrcs] =
     [ets:new(Name, TempOptions) ||
@@ -134,18 +143,78 @@ new() ->
 	 dialyzer_codeserver_temp_records, dialyzer_codeserver_temp_contract_srcs
         ]],
   #codeserver{code                = Code,
+              succ_types          = SuccTypes, % SCC => {VerCheckSum, Deps, SuuTypes, Contracts}
 	      exports             = Exports,
 	      temp_exported_types = TempExportedTypes,
 	      temp_records        = TempRecords,
 	      temp_contract_srcs  = TempContractSrcs}.
 
+increment_succ_types_phase(CS) ->
+  [{_, N}] = dets:lookup(CS#codeserver.succ_types, phase),
+  dets:insert(CS#codeserver.succ_types, {phase, N + 1}).
+
+get_succ_types(SCC0, Callgraph, CS) ->
+  [{_, CurrentPhase}] = dets:lookup(CS#codeserver.succ_types, phase),
+  SCC = remove_anonymous_from_scc(SCC0),
+  case dets:lookup(CS#codeserver.succ_types, SCC) of
+    [{_, Vers, Phase, SuccTypes, Contracts}] when Phase >= CurrentPhase ->
+      ExpectedVers = get_scc_version(SCC),
+      case ExpectedVers =:= Vers of
+        true  ->
+          %%io:format("cache hit: ~w\n", [SCC0]),
+          {ok, Phase, SuccTypes, Contracts};
+        false ->
+          Reqs = [remove_anonymous_from_scc(Req) || Req <- dialyzer_callgraph:get_required_by(SCC0, Callgraph)],
+          io:format("version mismatch: ~w: \n ~w <=> \n ~w\n reqs:~w\n",
+                    [SCC0,
+                     ExpectedVers,
+                     Vers,
+                    Reqs]),
+          dets:delete(CS#codeserver.succ_types, SCC),
+          lists:foreach(fun (Req) -> dets:delete(CS#codeserver.succ_types, Req) end, Reqs),
+          error
+      end;
+    _ ->
+      io:format("cache miss: ~w\n", [SCC0]),
+      error
+  end.
+
+%% TODO: normallize
+remove_anonymous_from_scc(SCC) ->
+  lists:sort(lists:filter(fun erlang:is_tuple/1, SCC)).
+
+get_scc_version(SCC) ->
+  [{M, proplists:get_value(vsn, M:module_info(attributes))} || {M, _, _} <- SCC].
+
+set_succ_types(SCC0, Callgraph, SuccTypes0, Contracts, CS) ->
+  {Phase, SuccTypes} =
+    case SuccTypes0 of
+      {final, _} -> SuccTypes0;
+      _          ->
+        [{_, Phase0}] = dets:lookup(CS#codeserver.succ_types, phase),
+        {Phase0, SuccTypes0}
+    end,
+  SCC = remove_anonymous_from_scc(SCC0),
+  Data = {SCC, get_scc_version(SCC), Phase, SuccTypes, Contracts},
+  dets:insert(CS#codeserver.succ_types, Data),
+
+  Reqs = [remove_anonymous_from_scc(Req) || Req <- dialyzer_callgraph:get_required_by(SCC0, Callgraph)],
+  lists:foreach(fun (Req) -> dets:delete(CS#codeserver.succ_types, Req) end, Reqs), % XXX:
+  CS.
+
+save_succ_types(#codeserver{succ_types = SuccTypes}) ->
+%  {ok, SuccTypesDets} = dets:open_file("/tmp/cache.dialyzer.succ_types", [{access, read_write}]),
+%  ok = dets:from_ets(SuccTypesDets, SuccTypes),
+  ok = dets:close(SuccTypes).
+
 -spec delete(codeserver()) -> 'ok'.
 
 delete(#codeserver{code = Code, exported_types = ExportedTypes,
+                   succ_types = SuccTypes,
 		   records = Records, contracts = Contracts,
 		   callbacks = Callbacks}) ->
   lists:foreach(fun ets:delete/1,
-		[Code, ExportedTypes, Records, Contracts, Callbacks]).
+		[Code, ExportedTypes, Records, Contracts, Callbacks, SuccTypes]).
 
 -spec insert(atom(), cerl:c_module(), codeserver()) -> codeserver().
 

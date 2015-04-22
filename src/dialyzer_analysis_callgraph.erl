@@ -78,6 +78,7 @@ start(Parent, LegalWarnings, Analysis) ->
   Analysis2 = run_analysis(Analysis1),
   State = #server_state{parent = Parent, legal_warnings = LegalWarnings},
   loop(State, Analysis2, none),
+
   dialyzer_timing:stop(TimingServer).
 
 run_analysis(Analysis) ->
@@ -194,6 +195,7 @@ analysis_start(Parent, Analysis) ->
   NonExportsList = sets:to_list(NonExports),
   Plt2 = dialyzer_plt:delete_list(State3#analysis_state.plt, NonExportsList),
   send_codeserver_plt(Parent, CServer, State3#analysis_state.plt),
+  dialyzer_codeserver:save_succ_types(CServer),
   send_analysis_done(Parent, Plt2, State3#analysis_state.doc_plt).
 
 analyze_callgraph(Callgraph, #analysis_state{codeserver = Codeserver,

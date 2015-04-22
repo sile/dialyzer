@@ -21,13 +21,13 @@
 %%%-------------------------------------------------------------------
 %%% File    : dialyzer_succ_typings.erl
 %%% Author  : Tobias Lindahl <tobiasl@it.uu.se>
-%%% Description : 
+%%% Description :
 %%%
 %%% Created : 11 Sep 2006 by Tobias Lindahl <tobiasl@it.uu.se>
 %%%-------------------------------------------------------------------
 -module(dialyzer_succ_typings).
 
--export([analyze_callgraph/3, 
+-export([analyze_callgraph/3,
 	 analyze_callgraph/6,
 	 get_warnings/8
 	]).
@@ -131,6 +131,7 @@ get_refined_success_typings(SCCs, #st{callgraph = Callgraph,
 		    dialyzer_callgraph:reset_from_funs(NotFixpoint2,
 						       ModCallgraph)),
 	  NewState = State2#st{callgraph = Callgraph2},
+          dialyzer_codeserver:increment_succ_types_phase(NewState#st.codeserver),
 	  get_refined_success_typings(NewSCCs, NewState)
       end
   end.
@@ -176,7 +177,7 @@ collect_warnings(M, {Codeserver, Callgraph, NoWarnUnused, Plt, DocPlt}) ->
   Contracts = dialyzer_codeserver:lookup_mod_contracts(M, Codeserver),
   AllFuns = collect_fun_info([ModCode]),
   %% Check if there are contracts for functions that do not exist
-  Warnings1 = 
+  Warnings1 =
     dialyzer_contracts:contracts_without_fun(Contracts, AllFuns, Callgraph),
   {Warnings2, FunTypes} =
     dialyzer_dataflow:get_warnings(ModCode, Plt, Callgraph,
@@ -222,7 +223,7 @@ postprocess_dataflow_warns([{?WARN_CONTRACT_RANGE, {CallF, CallL}, Msg}|Rest],
       W = {?WARN_CONTRACT_RANGE, {CallF, CallL}, NewMsg},
       postprocess_dataflow_warns(Rest, Codeserver, WAcc, [W|Acc])
   end.
-  
+
 refine_succ_typings(Modules, #st{codeserver = Codeserver,
                                  callgraph = Callgraph,
                                  plt = Plt,
@@ -303,15 +304,15 @@ reached_fixpoint(OldTypes0, NewTypes0, Strict) ->
 is_failed_or_not_called_fun(Type) ->
   erl_types:any_none([erl_types:t_fun_range(Type)|erl_types:t_fun_args(Type)]).
 
-compare_types(Dict1, Dict2, Strict) ->  
+compare_types(Dict1, Dict2, Strict) ->
   List1 = lists:keysort(1, dict:to_list(Dict1)),
   List2 = lists:keysort(1, dict:to_list(Dict2)),
   compare_types_1(List1, List2, Strict, []).
 
-compare_types_1([{X, _Type1}|Left1], [{X, failed_fun}|Left2], 
+compare_types_1([{X, _Type1}|Left1], [{X, failed_fun}|Left2],
 		Strict, NotFixpoint) ->
   compare_types_1(Left1, Left2, Strict, NotFixpoint);
-compare_types_1([{X, failed_fun}|Left1], [{X, _Type2}|Left2], 
+compare_types_1([{X, failed_fun}|Left1], [{X, _Type2}|Left2],
 		Strict, NotFixpoint) ->
   compare_types_1(Left1, Left2, Strict, NotFixpoint);
 compare_types_1([{X, Type1}|Left1], [{X, Type2}|Left2], Strict, NotFixpoint) ->
@@ -321,7 +322,7 @@ compare_types_1([{X, Type1}|Left1], [{X, Type2}|Left2], Strict, NotFixpoint) ->
 	end,
   case Res of
     true -> compare_types_1(Left1, Left2, Strict, NotFixpoint);
-    false -> 
+    false ->
       ?debug("Failed fixpoint for ~w: ~s =/= ~s\n",
 	     [X, erl_types:t_to_string(Type1), erl_types:t_to_string(Type2)]),
       compare_types_1(Left1, Left2, Strict, [{X, Type2}|NotFixpoint])
@@ -351,49 +352,65 @@ find_succ_typings(SCCs, #st{codeserver = Codeserver, callgraph = Callgraph,
 -spec find_succ_types_for_scc(scc(), typesig_init_data()) -> [mfa_or_funlbl()].
 
 find_succ_types_for_scc(SCC, {Codeserver, Callgraph, Plt, Solvers}) ->
-  SCC_Info = [{MFA, 
-	       dialyzer_codeserver:lookup_mfa_code(MFA, Codeserver),
-	       dialyzer_codeserver:lookup_mod_records(M, Codeserver)}
-	      || {M, _, _} = MFA <- SCC],
-  Contracts1 = [{MFA, dialyzer_codeserver:lookup_mfa_contract(MFA, Codeserver)}
-		|| {_, _, _} = MFA <- SCC],
-  Contracts2 = [{MFA, Contract} || {MFA, {ok, Contract}} <- Contracts1],
-  Contracts3 = orddict:from_list(Contracts2),
-  Label = dialyzer_codeserver:get_next_core_label(Codeserver),
-  AllFuns = collect_fun_info([Fun || {_MFA, {_Var, Fun}, _Rec} <- SCC_Info]),
-  PropTypes = get_fun_types_from_plt(AllFuns, Callgraph, Plt),
-  %% Assume that the PLT contains the current propagated types
-  FunTypes = dialyzer_typesig:analyze_scc(SCC_Info, Label, Callgraph,
-                                          Plt, PropTypes, Solvers),
-  AllFunSet = sets:from_list([X || {X, _} <- AllFuns]),
-  FilteredFunTypes =
-    dict:filter(fun(X, _) -> sets:is_element(X, AllFunSet) end, FunTypes),
-  FindOpaques = lookup_and_find_opaques_fun(Codeserver),
-  DecoratedFunTypes =
-    decorate_succ_typings(Contracts3, Callgraph, FilteredFunTypes, FindOpaques),
-  %% Check contracts
-  PltContracts =
-    dialyzer_contracts:check_contracts(Contracts3, Callgraph,
-                                       DecoratedFunTypes, FindOpaques),
-  %% ?debug("FilteredFunTypes ~p\n   ~n", [dict:to_list(FilteredFunTypes)]),
-  %% ?debug("SCC DecoratedFunTypes ~p\n   ~n", [dict:to_list(DecoratedFunTypes)]),
-  debug_pp_functions("SCC", FilteredFunTypes, DecoratedFunTypes, Callgraph),
-  ContractFixpoint =
-    lists:all(fun({MFA, _C}) ->
-		  %% Check the non-deleted PLT
-		  case dialyzer_plt:lookup_contract(Plt, MFA) of
-		    none -> false;
-		    {value, _} -> true
-		  end
-	      end, PltContracts),
-  Plt = insert_into_plt(DecoratedFunTypes, Callgraph, Plt),
-  Plt = dialyzer_plt:insert_contract_list(Plt, PltContracts),
-  case (ContractFixpoint andalso 
-	reached_fixpoint_strict(PropTypes, DecoratedFunTypes)) of
-    true -> [];
-    false ->
-      ?debug("Not fixpoint for: ~w\n", [AllFuns]),
-      [Fun || {Fun, _Arity} <- AllFuns]
+  case dialyzer_codeserver:get_succ_types(SCC, Callgraph, Codeserver) of
+    {ok, Phase, SuccTypes, PltContracts} ->
+      Plt = dialyzer_plt:insert_list(Plt, SuccTypes),
+      Plt = dialyzer_plt:insert_contract_list(Plt, PltContracts),
+      case Phase of
+        final -> [];
+        _     -> SCC
+      end;
+    error ->
+      SCC_Info = [{MFA,
+                   dialyzer_codeserver:lookup_mfa_code(MFA, Codeserver),
+                   dialyzer_codeserver:lookup_mod_records(M, Codeserver)}
+                  || {M, _, _} = MFA <- SCC],
+      Contracts1 = [{MFA, dialyzer_codeserver:lookup_mfa_contract(MFA, Codeserver)}
+                    || {_, _, _} = MFA <- SCC],
+      Contracts2 = [{MFA, Contract} || {MFA, {ok, Contract}} <- Contracts1],
+      Contracts3 = orddict:from_list(Contracts2),
+      Label = dialyzer_codeserver:get_next_core_label(Codeserver),
+      AllFuns = collect_fun_info([Fun || {_MFA, {_Var, Fun}, _Rec} <- SCC_Info]),
+      PropTypes = get_fun_types_from_plt(AllFuns, Callgraph, Plt),
+      %% Assume that the PLT contains the current propagated types
+      FunTypes = dialyzer_typesig:analyze_scc(SCC_Info, Label, Callgraph,
+                                              Plt, PropTypes, Solvers),
+      AllFunSet = sets:from_list([X || {X, _} <- AllFuns]),
+      FilteredFunTypes =
+        dict:filter(fun(X, _) -> sets:is_element(X, AllFunSet) end, FunTypes),
+      FindOpaques = lookup_and_find_opaques_fun(Codeserver),
+      DecoratedFunTypes =
+        decorate_succ_typings(Contracts3, Callgraph, FilteredFunTypes, FindOpaques),
+      %% Check contracts
+      PltContracts =
+        dialyzer_contracts:check_contracts(Contracts3, Callgraph,
+                                           DecoratedFunTypes, FindOpaques),
+      %% ?debug("FilteredFunTypes ~p\n   ~n", [dict:to_list(FilteredFunTypes)]),
+      %% ?debug("SCC DecoratedFunTypes ~p\n   ~n", [dict:to_list(DecoratedFunTypes)]),
+      debug_pp_functions("SCC", FilteredFunTypes, DecoratedFunTypes, Callgraph),
+      ContractFixpoint =
+        lists:all(fun({MFA, _C}) ->
+                      %% Check the non-deleted PLT
+                      case dialyzer_plt:lookup_contract(Plt, MFA) of
+                        none -> false;
+                        {value, _} -> true
+                      end
+                  end, PltContracts),
+
+      SuccTypes = format_succ_types(DecoratedFunTypes, Callgraph),
+      debug_pp_succ_typings(SuccTypes),
+      Plt = dialyzer_plt:insert_list(Plt, SuccTypes),
+      Plt = dialyzer_plt:insert_contract_list(Plt, PltContracts),
+      case (ContractFixpoint andalso
+            reached_fixpoint_strict(PropTypes, DecoratedFunTypes)) of
+        true ->
+          dialyzer_codeserver:set_succ_types(SCC, Callgraph, {final, SuccTypes}, PltContracts, Codeserver),
+          [];
+        false ->
+          dialyzer_codeserver:set_succ_types(SCC, Callgraph, SuccTypes, PltContracts, Codeserver),
+          ?debug("Not fixpoint for: ~w\n", [AllFuns]),
+          [Fun || {Fun, _Arity} <- AllFuns]
+      end
   end.
 
 decorate_succ_typings(Contracts, Callgraph, FunTypes, FindOpaques) ->
@@ -483,11 +500,11 @@ format_succ_types([], _Callgraph, Acc) ->
 -ifdef(DEBUG).
 debug_pp_succ_typings(SuccTypes) ->
   ?debug("Succ typings:\n", []),
-  [?debug("  ~w :: ~s\n", 
+  [?debug("  ~w :: ~s\n",
 	  [MFA, erl_types:t_to_string(erl_types:t_fun(ArgT, RetT))])
    || {MFA, {RetT, ArgT}} <- SuccTypes],
   ?debug("Contracts:\n", []),
-  [?debug("  ~w :: ~s\n", 
+  [?debug("  ~w :: ~s\n",
 	  [MFA, erl_types:t_to_string(erl_types:t_fun(ArgT, RetFun(ArgT)))])
    || {MFA, {contract, RetFun, ArgT}} <- SuccTypes],
   ?debug("\n", []),
@@ -518,6 +535,8 @@ debug_pp_functions(_, _, _, _) ->
   ok.
 -endif.
 
+lookup_name({M,F,A}, _) ->
+  {M,F,A};
 lookup_name(F, CG) ->
   case dialyzer_callgraph:lookup_name(F, CG) of
     error -> F;
