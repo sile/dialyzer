@@ -131,7 +131,13 @@ loop(#server_state{parent = Parent, legal_warnings = LegalWarnings} = State,
 %%--------------------------------------------------------------------
 
 analysis_start(Parent, Analysis) ->
-  CServer = dialyzer_codeserver:new(),
+  CServer0 = dialyzer_codeserver:new(),
+  CServer =
+    case Analysis#analysis.type == succ_typings of
+      true  -> dialyzer_codeserver:load_succ_types(CServer0);
+      false -> CServer0
+    end,
+
   Plt = Analysis#analysis.plt,
   State = #analysis_state{codeserver = CServer,
 			  analysis_type = Analysis#analysis.type,
@@ -179,6 +185,7 @@ analysis_start(Parent, Analysis) ->
   dump_callgraph(Callgraph, State0, Analysis),
   State1 = State0#analysis_state{codeserver = NewCServer},
   State2 = State1#analysis_state{no_warn_unused = NoWarn},
+
   %% Remove all old versions of the files being analyzed
   AllNodes = dialyzer_callgraph:all_nodes(Callgraph),
   Plt1 = dialyzer_plt:delete_list(NewPlt1, AllNodes),
@@ -194,8 +201,8 @@ analysis_start(Parent, Analysis) ->
   NonExports = sets:subtract(sets:from_list(AllNodes), Exports),
   NonExportsList = sets:to_list(NonExports),
   Plt2 = dialyzer_plt:delete_list(State3#analysis_state.plt, NonExportsList),
+  Analysis#analysis.type == succ_typings andalso dialyzer_codeserver:save_succ_types(CServer),
   send_codeserver_plt(Parent, CServer, State3#analysis_state.plt),
-  dialyzer_codeserver:save_succ_types(CServer),
   send_analysis_done(Parent, Plt2, State3#analysis_state.doc_plt).
 
 analyze_callgraph(Callgraph, #analysis_state{codeserver = Codeserver,
