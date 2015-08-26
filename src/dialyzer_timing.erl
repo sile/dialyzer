@@ -38,7 +38,7 @@ init(Active) ->
   case Active of
     true ->
       io:format("\n"),
-      spawn_link(fun() -> loop(now(), 0, "") end);
+      spawn_link(fun() -> loop(os:timestamp(), 0, "") end);
     debug ->
       io:format("\n"),
       spawn_link(fun() -> debug_loop("") end);
@@ -105,14 +105,14 @@ debug_loop(Phase) ->
 
 start_stamp(none, _) -> ok;
 start_stamp(Pid, Msg) ->
-  Pid ! {stamp, Msg, now()},
+  Pid ! {stamp, Msg, os:timestamp()},
   ok.
 
 -spec end_stamp(timing_server()) -> ok.
 
 end_stamp(none) -> ok;
 end_stamp(Pid) ->
-  Pid ! {stamp, now()},
+  Pid ! {stamp, os:timestamp()},
   ok.
 
 -spec send_size_info(timing_server(), integer(), string()) -> ok.
@@ -126,7 +126,7 @@ send_size_info(Pid, Size, Unit) ->
 
 stop(none) -> ok;
 stop(Pid) ->
-  Pid ! {self(), stop, now()},
+  Pid ! {self(), stop, os:timestamp()},
   receive ok -> ok end.
 
 diff(T2, T1) ->
